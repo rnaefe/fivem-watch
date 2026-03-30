@@ -1,0 +1,257 @@
+<!--
+  fivem-watch - Hidden NUI Page
+  Mirrors screenshot-basic exact approach.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { background-color: transparent; margin: 0; padding: 0; }
+    html, body { overflow: hidden; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<!-- Socket.io client -->
+<script src="nui://fivem-watch-resource/web/socket.io.min.js"></script>
+
+<!-- @citizenfx/three bundle -->
+<script src="nui://fivem-watch-resource/web/cfx-three.min.js"></script>
+
+<script>
+// ---- State ----
+let socket = null;
+let isCapturing = false;
+let config = {
+  backendUrl: 'http://localhost:3001',
+  apiSecret: '',
+  playerId: 0,
+  streamFps: 5,
+  streamQuality: 0.6,
+  resolutionScale: 0.5,
+};
+
+// ---- Three.js resources ----
+let renderer, sceneRTT, cameraRTT, rtTexture, material;
+let outputCanvas, outputCtx;
+let captureRequestPending = false;
+let captureIntervalTimer = null;
+
+function getRenderWidth() { return Math.floor(window.innerWidth * config.resolutionScale); }
+function getRenderHeight() { return Math.floor(window.innerHeight * config.resolutionScale); }
+
+function init() {
+  const T = window.CFX_THREE;
+  const rw = getRenderWidth();
+  const rh = getRenderHeight();
+
+  // Camera
+  cameraRTT = new T.OrthographicCamera(rw / -2, rw / 2, rh / 2, rh / -2, -10000, 10000);
+  cameraRTT.position.z = 100;
+
+  // Scene
+  sceneRTT = new T.Scene();
+
+  // Render Target
+  rtTexture = new T.WebGLRenderTarget(rw, rh, {
+    minFilter: T.LinearFilter,
+    magFilter: T.NearestFilter,
+    format: T.RGBAFormat,
+    type: T.UnsignedByteType
+  });
+
+  // Game Texture (CfxTexture)
+  const gameTexture = new T.CfxTexture();
+  gameTexture.needsUpdate = true;
+
+  // Material & Shader
+  material = new T.ShaderMaterial({
+    uniforms: { "tDiffuse": { value: gameTexture } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = vec2(uv.x, 1.0-uv.y); // Y-flip
+        gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+      }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
+      uniform sampler2D tDiffuse;
+      void main() {
+        gl_FragColor = texture2D( tDiffuse, vUv );
+      }
+    `
+  });
+
+  // Mesh
+  const plane = new T.PlaneGeometry(rw, rh);
+  const quad = new T.Mesh(plane, material);
+  quad.position.z = -100;
+  sceneRTT.add(quad);
+
+  // Renderer
+  renderer = new T.WebGLRenderer();
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(rw, rh);
+  renderer.autoClear = false;
+
+  // Append to DOM (like screenshot-basic)
+  const appEl = document.getElementById('app');
+  appEl.appendChild(renderer.domElement);
+  appEl.style.display = 'none'; // hide it
+
+  // Output 2D canvas
+  outputCanvas = document.createElement('canvas');
+  outputCtx = outputCanvas.getContext('2d');
+
+  // Listen to window resizes
+  window.addEventListener('resize', resize);
+
+  console.log('[fivem-watch] Engine initialized');
+  animate();
+}
+
+function resize() {
+  const T = window.CFX_THREE;
+  const rw = getRenderWidth();
+  const rh = getRenderHeight();
+
+  cameraRTT = new T.OrthographicCamera(rw / -2, rw / 2, rh / 2, rh / -2, -10000, 10000);
+  cameraRTT.position.z = 100;
+
+  rtTexture = new T.WebGLRenderTarget(rw, rh, {
+    minFilter: T.LinearFilter,
+    magFilter: T.NearestFilter,
+    format: T.RGBAFormat,
+    type: T.UnsignedByteType
+  });
+
+  const plane = new T.PlaneGeometry(rw, rh);
+  const quad = new T.Mesh(plane, material);
+  quad.position.z = -100;
+
+  sceneRTT = new T.Scene();
+  sceneRTT.add(quad);
+
+  renderer.setSize(rw, rh);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Always keep rendering the game view to the target (keeps WebGL active)
+  renderer.clear();
+  renderer.render(sceneRTT, cameraRTT, rtTexture, true);
+
+  if (captureRequestPending) {
+    captureRequestPending = false;
+    processCapture();
+  }
+}
+
+function processCapture() {
+  if (!isCapturing || !socket?.connected) return;
+
+  // Render at the scaled resolution natively in WebGL instead of CPU JS!
+  // This reduces the readRenderTargetPixels memory transfer by 84% at scale 0.4
+  const scaledWidth = Math.floor(window.innerWidth * config.resolutionScale);
+  const scaledHeight = Math.floor(window.innerHeight * config.resolutionScale);
+
+  // Read SCALED pixels
+  const read = new Uint8Array(scaledWidth * scaledHeight * 4);
+  renderer.readRenderTargetPixels(rtTexture, 0, 0, scaledWidth, scaledHeight, read);
+
+  // Set canvas perfectly to the scaled size
+  if (outputCanvas.width !== scaledWidth || outputCanvas.height !== scaledHeight) {
+    outputCanvas.width = scaledWidth;
+    outputCanvas.height = scaledHeight;
+  }
+
+  // Put pixels onto canvas
+  const d = new Uint8ClampedArray(read.buffer);
+  outputCtx.putImageData(new ImageData(d, scaledWidth, scaledHeight), 0, 0);
+
+  // Encode via base64 WEBP (way faster on Chromium browsers than JPEG)
+  const dataUrl = outputCanvas.toDataURL('image/webp', config.streamQuality);
+
+  // Send
+  // console.log(`[fivem-watch] Emitting ${scaledWidth}x${scaledHeight} frame, length: ${dataUrl.length}`);
+  socket.emit('frame', dataUrl);
+}
+
+window.addEventListener('message', (event) => {
+  const msg = event.data;
+  if (msg.type === 'init') {
+    Object.assign(config, msg);
+    connectToBackend();
+  } else if (msg.type === 'stopCapture') {
+    stopCapture();
+  }
+});
+
+// Dynamic config coming from backend (when admin changes settings)
+function handleConfigUpdate(newConfig) {
+  const oldScale = config.resolutionScale;
+  const oldFps = config.streamFps;
+
+  Object.assign(config, newConfig);
+
+  // If resolution changed, recreate WebGL Render Target
+  if (oldScale !== config.resolutionScale) {
+    resize();
+  }
+
+  // If FPS changed AND we are capturing, restart interval
+  if (oldFps !== config.streamFps && isCapturing) {
+    stopCapture();
+    startCapture();
+  }
+}
+
+// ---- Networking & Controls ----
+
+function connectToBackend() {
+  if (socket?.connected) return;
+
+  socket = io(config.backendUrl, {
+    auth: { role: 'fivem-nui', secret: config.apiSecret, playerId: config.playerId },
+    transports: ['websocket'],
+    reconnection: true,
+  });
+
+  socket.on('connect', () => console.log('[fivem-watch] Socket connected'));
+  socket.on('disconnect', stopCapture);
+  socket.on('start_capture', startCapture);
+  socket.on('stop_capture', stopCapture);
+  socket.on('update_config', handleConfigUpdate);
+}
+
+function startCapture() {
+  if (isCapturing) return;
+  isCapturing = true;
+
+  const interval = Math.floor(1000 / config.streamFps);
+  captureIntervalTimer = setInterval(() => {
+    captureRequestPending = true;
+  }, interval);
+  
+  console.log(`[fivem-watch] Capture started at ${config.streamFps} FPS`);
+}
+
+function stopCapture() {
+  isCapturing = false;
+  if (captureIntervalTimer) {
+    clearInterval(captureIntervalTimer);
+    captureIntervalTimer = null;
+  }
+}
+
+// Start graphics engine
+init();
+
+</script>
+</body>
+</html>
