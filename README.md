@@ -6,6 +6,12 @@
 
 Production-oriented, real-time FiveM monitoring platform with live map telemetry and on-demand player stream relay.
 
+## Preview Video
+
+[![Watch Preview Video](https://img.shields.io/badge/Watch-Preview%20Video-red?logo=streamable&logoColor=white)](https://streamable.com/da58u5)
+
+Direct link: https://streamable.com/da58u5
+
 ## Why this project
 
 `fivem-watch` targets communities that need operational visibility without introducing heavy infrastructure. It provides a control plane for player observability while preserving low runtime overhead on the game side.
