@@ -1,248 +1,746 @@
 # Technical Architecture
 
-## 1) Architectural Intent
+`fivem-watch` is a remote operator dashboard for multiplayer servers.
 
-`fivem-watch` is designed as a low-latency, operationally simple observability plane for FiveM servers. The core design objective is to maximize real-time fidelity while minimizing coupling, deployment overhead, and runtime footprint on game clients.
+It replaces manual in-game spectating workflows with a web-based control plane that streams player state, map position, and live session context to authenticated operators.
+
+The system is designed around one core idea:
+
+> keep the game-side resource lightweight, push orchestration into the backend, and only stream expensive media when an operator is actually watching.
+
+---
+
+## What Problem Does It Solve?
+
+In many multiplayer server operations, moderators or admins need to enter the game and manually spectate players to understand what is happening.
+
+That workflow has problems:
+
+- it requires operators to join the game
+- it adds friction during live moderation
+- it does not scale well when multiple operators need visibility
+- it mixes operational monitoring with gameplay
+- it gives limited centralized context
+
+`fivem-watch` moves that workflow into a remote dashboard.
+
+Operators can inspect player position, state, and live session context from the browser without manually attaching themselves to the in-game spectate flow.
+
+---
+
+## Design Goals
+
+The project is optimized for small-to-mid self-hosted multiplayer communities.
 
 Primary goals:
 
-- Near real-time player telemetry propagation to operators.
-- On-demand, watcher-scoped live player stream relay.
-- Zero mandatory persistence (stateless backend process with in-memory working set).
-- Minimal operational dependencies for self-hosted communities.
+- near real-time player state updates
+- remote operator dashboard for live monitoring
+- on-demand player stream relay
+- watcher-scoped media routing
+- minimal game-client runtime overhead
+- simple self-hosted deployment
+- no mandatory database or long-term storage requirement
 
-Non-goals (current version):
+Non-goals for the current version:
 
-- Long-term event archival.
-- Multi-tenant authorization domains.
-- Exactly-once delivery guarantees.
+- long-term replay/archive system
+- multi-tenant SaaS authorization model
+- exactly-once delivery
+- enterprise-scale media distribution
+- full anti-cheat or enforcement engine
 
-## 2) Context and Bounded Domains
+This is an operator visibility tool, not a full moderation platform.
 
-The system is intentionally split into three bounded contexts:
+---
 
-1. **Game Edge Context** (`fivem-watch-resource`)
-   - Produces telemetry (server script).
-   - Produces media frames (NUI script).
-2. **Control Plane Context** (`server`)
-   - Authenticates actors.
-   - Validates ingest traffic.
-   - Routes telemetry and media to interested admin sockets.
-3. **Operator Experience Context** (`client`)
-   - Renders live state and map overlays.
-   - Initiates stream control commands.
+## High-Level Architecture
 
-This separation keeps game-native code lean and pushes orchestration concerns to the backend where observability and policy are easier to evolve.
+```mermaid
+flowchart TD
+    A[FiveM Server Resource] -->|Player snapshots via HTTP| B[Backend Control Plane]
+    C[NUI Capture Client] -->|Socket.io frame stream| B
 
-## 3) Runtime Topology
+    B -->|players_update| D[Operator Dashboard]
+    B -->|player_frame only to watchers| D
 
-### Components
+    D -->|start_stream / stop_stream| B
+    B -->|start_capture / stop_capture| C
 
-- `fivem-watch-resource/server/main.js`
-  - Periodic telemetry aggregator.
-  - Push-only HTTP publisher toward `/api/ingest`.
-- `fivem-watch-resource/client/main.js`
-  - NUI bootstrapper and runtime config bridge.
-- `fivem-watch-resource/web/index.html`
-  - WebGL capture pipeline and frame publisher.
-- `server/index.js`
-  - Express REST endpoints.
-  - Socket.io event router.
-  - In-memory routing/index state.
-- `client/src/*`
-  - Admin UX, map projection layer, stream viewers.
+    B -->|In-memory indexes| E[(Runtime State)]
+```
 
-### Trust Zones
+The architecture is split into three bounded contexts:
 
-- **Zone A (FiveM host)**: telemetry and frame producers.
-- **Zone B (Backend host)**: control and routing authority.
-- **Zone C (Admin browser)**: authenticated read/control clients.
+1. **Game Edge**
+   - runs inside the FiveM environment
+   - collects player state
+   - starts/stops NUI capture
+   - sends telemetry and frames outward
 
-The backend is the policy enforcement point between all zones.
+2. **Backend Control Plane**
+   - authenticates actors
+   - receives telemetry snapshots
+   - tracks connected admins and NUI clients
+   - routes frames only to interested watchers
 
-## 4) Communication Model
+3. **Operator Experience**
+   - web dashboard
+   - map overlays
+   - player list
+   - live stream viewer
+   - stream control UI
 
-### Telemetry Path
+This keeps game-native code lean and moves routing, policy, and orchestration into the backend.
 
-1. FiveM server gathers player metrics using native calls.
-2. Snapshot array is POSTed to `POST /api/ingest` with `x-api-key`.
-3. Backend updates `playersState` and emits `players_update` to authenticated admins.
+---
+
+## Runtime Topology
+
+```txt
+FiveM Server
+  ├─ server/main.js
+  │    └─ collects player snapshots
+  │    └─ POST /api/ingest
+  │
+  ├─ client/main.js
+  │    └─ bootstraps NUI capture context
+  │
+  └─ web/index.html
+       └─ captures game viewport frames
+       └─ sends frame events over Socket.io
+
+
+Backend Server
+  ├─ Express REST API
+  ├─ Socket.io router
+  ├─ in-memory player state
+  ├─ in-memory socket indexes
+  └─ stream watcher registry
+
+
+Operator Browser
+  ├─ React dashboard
+  ├─ Leaflet map layer
+  ├─ player list
+  └─ live stream viewer
+```
+
+---
+
+## Data Flow
+
+## 1. Player Telemetry Flow
+
+```txt
+FiveM server resource
+      ↓
+collect player state snapshot
+      ↓
+POST /api/ingest
+      ↓
+backend updates playersState
+      ↓
+Socket.io emits players_update
+      ↓
+operator dashboard updates map/list UI
+```
+
+Telemetry is snapshot-based.
 
 Characteristics:
 
-- Delivery model: at-most-once per interval.
-- State model: latest snapshot wins.
-- Recovery model: next interval self-heals missing payloads.
+- latest snapshot wins
+- delivery is at-most-once per interval
+- missed updates self-heal on the next ingest cycle
+- no long-term persistence is required
+- frontend always renders the latest known state
 
-### Stream Path
+This is intentionally simpler than event sourcing because operators need current visibility more than historical reconstruction.
 
-1. Admin emits `start_stream(playerId)`.
-2. Backend resolves target NUI socket from `nuiClients`.
-3. Backend emits `start_capture` to that specific NUI socket.
-4. NUI publishes `frame` events (base64 `image/webp`).
-5. Backend relays `player_frame` only to watcher sockets of that player.
-6. When watcher count reaches zero, backend emits `stop_capture`.
+---
 
-Characteristics:
+## 2. Live Stream Flow
 
-- Interest-based fan-out (watcher set routing).
-- Backpressure strategy: implicit quality/FPS reduction via runtime config.
-- Resource lifecycle: stream loop exists only when demanded.
+```txt
+operator clicks watch
+      ↓
+dashboard emits start_stream(playerId)
+      ↓
+backend resolves target NUI socket
+      ↓
+backend emits start_capture
+      ↓
+NUI captures WebGL frames
+      ↓
+NUI sends frame events
+      ↓
+backend relays frames only to watchers of that player
+      ↓
+operator dashboard renders live stream
+```
 
-## 5) Backend In-Memory Domain Model
+The stream exists only while at least one operator is watching.
 
-Current in-memory structures in `server/index.js`:
+When the watcher count reaches zero:
 
-- `playersState: PlayerData[]`
-- `nuiClients: Map<playerId, socketId>`
-- `activeStreams: Set<playerId>`
-- `adminSockets: Set<socketId>`
-- `streamWatchers: Map<playerId, Set<adminSocketId>>`
+```txt
+last watcher disconnects / stops watching
+      ↓
+backend removes watcher
+      ↓
+watcher set becomes empty
+      ↓
+backend emits stop_capture
+      ↓
+NUI stops frame capture
+```
 
-Design rationale:
+This prevents unnecessary frame capture, CPU usage, and bandwidth consumption.
 
-- O(1) lookup for per-player routing.
-- Constant-time watcher membership updates.
-- No frame broadcast amplification to non-interested clients.
+---
+
+## Backend In-Memory Model
+
+The backend is currently optimized for a single-node, low-dependency deployment.
+
+Core runtime structures:
+
+```ts
+playersState: PlayerData[]
+
+nuiClients: Map<PlayerId, SocketId>
+
+adminSockets: Set<SocketId>
+
+activeStreams: Set<PlayerId>
+
+streamWatchers: Map<PlayerId, Set<AdminSocketId>>
+```
+
+Why in-memory?
+
+- simple deployment
+- low latency lookups
+- no mandatory Redis/database dependency
+- O(1) routing from playerId to NUI socket
+- constant-time watcher membership updates
 
 Trade-off:
 
-- Stateful process memory implies horizontal scaling needs session affinity or external coordination.
+> horizontal scaling requires externalized socket state, sticky sessions, or a dedicated media relay layer.
 
-## 6) Security Posture (Current vs Target)
+For the current target audience, operational simplicity is more valuable than distributed scalability.
 
-### Current posture
+---
 
-- Shared secret (`API_SECRET`) used for:
-  - ingest authorization (`x-api-key`),
-  - socket role admission (`handshake.auth.secret`),
-  - admin token after login.
+## Stream Routing Model
 
-### Risks
+The most important design decision is watcher-scoped frame routing.
 
-- Secret reuse across trust boundaries increases blast radius.
-- Token equals shared secret (no token rotation semantics).
-- No role-scoped cryptographic claims.
+Naive approach:
 
-### Recommended hardening path
+```txt
+NUI frame
+  ↓
+broadcast to every admin
+```
 
-1. Introduce JWT access tokens with short TTL and role claims.
-2. Separate secrets per actor class (server-ingest, nui, admin).
-3. Add rate limiting for `/api/auth/login` and `/api/ingest`.
-4. Enforce TLS termination and strict CORS allowlists.
-5. Add replay protection (nonce/timestamp signature) for ingest in hostile networks.
+Problem:
 
-## 7) Reliability and Failure Modes
+- wastes bandwidth
+- sends frames to uninterested operators
+- creates unnecessary browser/rendering load
+- amplifies traffic as admin count grows
 
-### Expected failures and behavior
+`fivem-watch` approach:
 
-- **Backend restart**: all in-memory routing state resets; actors reconnect and repopulate state.
-- **NUI disconnect**: stream watchers receive stream errors or empty frames until reconnect.
-- **FiveM telemetry interruption**: UI eventually displays stale data until next successful ingest.
-- **Admin disconnect**: backend garbage-collects watcher memberships and auto-stops orphaned captures.
+```txt
+NUI frame for player A
+  ↓
+backend checks streamWatchers[playerA]
+  ↓
+relay only to admins watching player A
+```
 
-### Recovery model
+This keeps frame delivery proportional to actual demand.
 
-- Connection-oriented self-recovery via Socket.io reconnection.
-- Idempotent control operations (`start_stream` repeated is safe).
-- Snapshot telemetry naturally converges on next successful interval.
+```txt
+cost ≈ active streams × watchers per stream
+```
 
-## 8) Performance Engineering Notes
+instead of:
 
-Key controls:
+```txt
+cost ≈ active streams × all connected admins
+```
 
-- `TELEMETRY_INTERVAL` governs backend ingest frequency.
-- `STREAM_FPS`, `STREAM_RESOLUTION_SCALE`, `STREAM_QUALITY` govern stream cost.
-- Frame routing is watcher-scoped, not global broadcast.
+---
 
-Heuristic guidance:
+## Component Breakdown
 
-- If bandwidth constrained, reduce `STREAM_RESOLUTION_SCALE` first.
-- If CPU constrained on client/NUI, reduce `STREAM_FPS`.
-- If visual artifacts are acceptable, reduce `STREAM_QUALITY`.
+## 1. FiveM Server Resource
 
-## 9) Frontend Architecture
+Responsibilities:
 
-- `client/src/App.jsx`
-  - session bootstrap, socket lifecycle, stream session orchestration.
-- `client/src/components/GameMap.jsx`
-  - Leaflet custom CRS transform aligned to GTA V coordinate space.
-- `client/src/components/PlayerList.jsx`
-  - indexed human operator interaction surface.
-- `client/src/components/LiveStream.jsx`
-  - per-player stream viewport with runtime quality controls.
-- `client/src/socket.js`
-  - singleton socket abstraction for deterministic subscription wiring.
+- gather player state using native server/runtime calls
+- build snapshot arrays
+- send snapshots to the backend ingest endpoint
+- avoid heavy processing inside the game runtime
+- keep telemetry push-only
 
-The UI is intentionally thin: business routing logic remains in the backend control plane.
+Example:
 
-## 10) API and Event Contract (Canonical)
+```txt
+server/main.js
+  ↓
+collect players
+  ↓
+POST /api/ingest
+```
 
-### REST
+Design principle:
 
-- `POST /api/auth/login`
-  - request: `{ username, password }`
-  - response: `{ success: true, token }` on success
-- `GET /api/health`
-  - response: process health and aggregate counts
-- `POST /api/ingest`
-  - header: `x-api-key`
-  - body: `PlayerData[]`
+> the game resource should emit state, not own orchestration.
 
-### Socket Roles
+---
 
-- `admin`
-- `fivem-server`
-- `fivem-nui`
+## 2. NUI Capture Client
 
-### Admin Commands
+Responsibilities:
 
-- `start_stream(playerId)`
-- `stop_stream(playerId)`
-- `update_stream_config({ playerId, config })`
+- receive `start_capture` / `stop_capture`
+- capture the game viewport through the NUI/WebGL path
+- encode frames as compressed image payloads
+- send frame events over Socket.io
+- apply runtime stream config such as FPS, scale, and quality
 
-### Admin Events
+Capture is on-demand.
 
-- `players_update(players)`
-- `player_frame({ playerId, frame })`
-- `stream_error({ playerId, error })`
-- `server_offline`
+The NUI client should not continuously capture frames when no operator is watching.
 
-### NUI Control Events
+---
 
-- inbound: `start_capture`, `stop_capture`, `update_config`
-- outbound: `frame(base64Image)`
+## 3. Backend Control Plane
 
-## 11) Scalability Roadmap
+Responsibilities:
 
-Current architecture is single-node optimized. For multi-node scale:
+- authenticate ingest and socket actors
+- receive telemetry snapshots
+- maintain latest player state
+- maintain socket indexes
+- route admin commands
+- start and stop NUI capture sessions
+- relay frames only to active watchers
 
-1. Externalize socket state (Redis adapter for Socket.io).
-2. Externalize player/session indexes to shared cache.
+Main backend concepts:
+
+```txt
+REST API        -> auth, health, ingest
+Socket.io       -> bidirectional control and frame routing
+In-memory state -> player snapshots and socket indexes
+```
+
+The backend acts as the policy and routing authority between all zones.
+
+---
+
+## 4. Operator Dashboard
+
+Responsibilities:
+
+- authenticate the operator
+- open and maintain Socket.io connection
+- render player list
+- render map overlays
+- start/stop player streams
+- display live session context
+- apply stream quality controls
+
+The dashboard should be thin.
+
+Business routing logic stays in the backend control plane.
+
+---
+
+## API and Event Contract
+
+## REST API
+
+```txt
+POST /api/auth/login
+```
+
+Request:
+
+```json
+{
+  "username": "admin",
+  "password": "password"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "token": "..."
+}
+```
+
+---
+
+```txt
+GET /api/health
+```
+
+Returns process health and aggregate runtime counts.
+
+---
+
+```txt
+POST /api/ingest
+```
+
+Headers:
+
+```txt
+x-api-key: <server-secret>
+```
+
+Body:
+
+```json
+[
+  {
+    "id": 12,
+    "name": "player_name",
+    "coords": {
+      "x": 123.4,
+      "y": 456.7,
+      "z": 21.0
+    },
+    "health": 190,
+    "armor": 50
+  }
+]
+```
+
+---
+
+## Socket Roles
+
+```txt
+admin
+fivem-server
+fivem-nui
+```
+
+---
+
+## Admin Commands
+
+```txt
+start_stream(playerId)
+stop_stream(playerId)
+update_stream_config({ playerId, config })
+```
+
+---
+
+## Admin Events
+
+```txt
+players_update(players)
+player_frame({ playerId, frame })
+stream_error({ playerId, error })
+server_offline
+```
+
+---
+
+## NUI Control Events
+
+Inbound:
+
+```txt
+start_capture
+stop_capture
+update_config
+```
+
+Outbound:
+
+```txt
+frame(base64Image)
+```
+
+---
+
+## Trust Zones
+
+```txt
+Zone A: FiveM Host
+  - telemetry producer
+  - NUI frame producer
+
+Zone B: Backend Host
+  - auth
+  - ingest validation
+  - stream routing
+  - policy enforcement
+
+Zone C: Operator Browser
+  - authenticated read/control client
+```
+
+The backend is the trust boundary between game-side producers and operator-facing consumers.
+
+---
+
+## Security Posture
+
+## Current Posture
+
+Current version uses a shared secret for:
+
+- ingest authorization
+- socket admission
+- admin token validation
+
+This is acceptable for controlled self-hosted environments but should be hardened before hostile/public deployments.
+
+---
+
+## Known Risks
+
+- shared secret reuse increases blast radius
+- no short-lived token semantics
+- no role-scoped cryptographic claims
+- ingest endpoint can be abused if exposed publicly
+- no replay protection for ingest payloads
+
+---
+
+## Recommended Hardening Path
+
+1. Introduce JWT access tokens with short TTL.
+2. Separate secrets per actor class:
+   - server ingest
+   - NUI capture
+   - admin dashboard
+3. Add rate limiting for:
+   - `/api/auth/login`
+   - `/api/ingest`
+4. Enforce TLS termination.
+5. Add strict CORS allowlists.
+6. Add nonce/timestamp signatures for ingest replay protection.
+7. Add role-scoped claims for admin capabilities.
+
+Security rule:
+
+> authentication should prove identity, but authorization should decide what an actor can do.
+
+---
+
+## Reliability Model
+
+Expected failure behavior:
+
+| Failure | Behavior |
+|---|---|
+| Backend restart | In-memory state resets; actors reconnect and repopulate state |
+| FiveM telemetry interruption | Dashboard shows stale state until next successful ingest |
+| NUI disconnect | Active stream fails or pauses until reconnect |
+| Admin disconnect | Watcher membership is garbage-collected |
+| Last watcher leaves | Backend stops capture for that player |
+| Dropped telemetry payload | Next snapshot self-heals state |
+
+Recovery model:
+
+- Socket.io reconnection restores actors
+- snapshot telemetry converges naturally
+- repeated `start_stream` calls are idempotent
+- watcher cleanup prevents orphaned capture loops
+
+---
+
+## Performance Controls
+
+The project exposes runtime controls for tuning cost and latency.
+
+Telemetry:
+
+```txt
+TELEMETRY_INTERVAL
+```
+
+Stream:
+
+```txt
+STREAM_FPS
+STREAM_RESOLUTION_SCALE
+STREAM_QUALITY
+```
+
+Guidance:
+
+- bandwidth constrained → reduce `STREAM_RESOLUTION_SCALE`
+- CPU constrained on NUI/client → reduce `STREAM_FPS`
+- visual artifacts acceptable → reduce `STREAM_QUALITY`
+- operator only needs rough context → reduce both FPS and quality
+
+The important constraint:
+
+> streaming should be paid for only when someone is watching.
+
+---
+
+## Scalability Roadmap
+
+Current architecture is single-node optimized.
+
+To scale beyond one backend process:
+
+1. Externalize Socket.io state using Redis adapter.
+2. Move player/session indexes into shared cache.
 3. Introduce sticky sessions or consistent routing for stream ownership.
-4. Isolate frame relay into dedicated media gateway workers.
-5. Add adaptive stream policy engine (target bitrate/FPS by client capacity).
+4. Split frame relay into dedicated media gateway workers.
+5. Add adaptive stream policy by operator bandwidth/client capacity.
+6. Add persistent event storage if historical replay becomes a product goal.
 
-## 12) Observability and SLO Baseline
+Suggested future topology:
 
-Recommended production telemetry:
+```txt
+Operator Browser
+      ↓
+Load Balancer
+      ↓
+Backend Control Plane
+      ↓
+Redis Socket Adapter
+      ↓
+Media Relay Workers
+      ↓
+NUI Capture Clients
+```
 
-- Ingest RPS, ingest error rate, auth failures.
-- Active admins, active streams, per-player watcher count.
-- Frame relay throughput (frames/sec, bytes/sec).
-- End-to-end latency (capture timestamp to browser paint).
+---
 
-Suggested initial SLOs:
+## Observability Baseline
 
-- Telemetry freshness P95 < 2.5s.
-- Stream startup latency P95 < 3s.
-- Frame relay success rate > 99% under nominal load.
+Recommended production metrics:
 
-## 13) Architectural Decisions (Current)
+- ingest RPS
+- ingest error rate
+- active admins
+- active streams
+- watcher count per player
+- frame throughput
+- stream startup latency
+- capture-to-browser latency
+- socket disconnect rate
+- auth failures
 
-- **ADR-001**: In-memory state over external datastore (simplicity first).
-- **ADR-002**: Socket.io for bidirectional control/data channels.
-- **ADR-003**: WebGL capture in NUI, activated only on demand.
-- **ADR-004**: Snapshot telemetry model over event-sourcing model.
+Suggested initial targets:
 
-These decisions are coherent with the product goal: operational simplicity with acceptable real-time behavior for small-to-mid community servers.
+- telemetry freshness P95 under 2.5s
+- stream startup P95 under 3s
+- frame relay success rate above 99% under nominal load
+
+These are baseline targets, not guarantees.
+
+They should be measured and adjusted based on real deployment conditions.
+
+---
+
+## Architecture Decisions
+
+## ADR-001: In-memory state over external datastore
+
+Decision:
+
+> keep runtime state in memory for the first version.
+
+Reason:
+
+- simpler deployment
+- lower operational cost
+- low-latency routing
+- enough for single-server communities
+
+Trade-off:
+
+- horizontal scaling requires external coordination
+
+---
+
+## ADR-002: Socket.io for control and stream channels
+
+Decision:
+
+> use Socket.io for bidirectional events.
+
+Reason:
+
+- reconnect behavior
+- room/socket abstractions
+- browser-friendly
+- good fit for control commands and live updates
+
+Trade-off:
+
+- raw WebSocket may be leaner
+- scaling needs adapter support
+
+---
+
+## ADR-003: On-demand WebGL/NUI capture
+
+Decision:
+
+> only capture frames when an operator is watching.
+
+Reason:
+
+- avoids constant media cost
+- reduces game/client runtime overhead
+- aligns resource usage with real operator demand
+
+Trade-off:
+
+- stream startup has initial latency
+- NUI capture path needs careful tuning
+
+---
+
+## ADR-004: Snapshot telemetry over event sourcing
+
+Decision:
+
+> use latest-state snapshots for player telemetry.
+
+Reason:
+
+- operator dashboard needs current state
+- missed snapshots self-heal
+- no database required
+- simpler than maintaining event history
+
+Trade-off:
+
+- no built-in historical replay
+- stale data must be handled in UI
+
+---
+
+## Summary
+
+`fivem-watch` is built around a practical operational workflow:
+
+> help operators understand live server context without manually entering the game and spectating players.
+
+The architecture keeps the game-side resource lightweight, moves orchestration into a backend control plane, and routes expensive live media only to operators who explicitly request it.
+
+The result is a self-hosted remote operator dashboard with real-time player telemetry, map context, and watcher-scoped live stream relay.
