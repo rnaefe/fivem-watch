@@ -2,7 +2,7 @@
 
 This guide gets `fivem-watch` from clone to live operator console.
 
-The deployment model is intentionally lean: one Node.js control plane, one static dashboard, and one FiveM resource. No database is required for the current single-node version.
+The deployment model is intentionally lean: one Node.js control plane, one static dashboard, and one FiveM resource. The system feels like a live observability stack, but the operating model stays small enough to self-host without dragging in a database, media server, or screenshot sidecar.
 
 ## 1. Prerequisites
 
@@ -28,7 +28,7 @@ FiveM server -> backend control plane
 operator browser -> HTTPS reverse proxy -> dashboard/API
 ```
 
-The backend should be treated as the control boundary. It owns auth, ingest validation, stream lifecycle, and watcher-scoped frame routing.
+The backend should be treated as the control boundary. It owns auth, ingest validation, stream lifecycle, and watcher-scoped frame routing; capture work stays at the NUI edge.
 
 ## 3. Backend Setup
 
@@ -164,7 +164,7 @@ Resource naming matters because `web/index.html` loads bundled assets through `n
 
 ## 8. Performance Tuning
 
-Stream load is the expensive path. Tune in this order:
+Stream load is the expensive path. The pipeline is built to make that cost adjustable instead of permanent. Tune in this order:
 
 1. Lower `STREAM_RESOLUTION_SCALE`.
 2. Lower `STREAM_FPS`.

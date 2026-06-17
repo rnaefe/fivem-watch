@@ -2,7 +2,7 @@
 
 `fivem-watch` is a self-hosted real-time observability console for FiveM operations.
 
-The core design is a centralized, watcher-scoped relay. The backend is not a passive tunnel; it is the control plane that authenticates actors, accepts telemetry, tracks NUI producers, counts watchers, and decides where frames are allowed to go.
+The core design is a centralized, watcher-scoped relay with distributed capture at the edge. The backend is not a passive tunnel; it is the control plane that authenticates actors, accepts telemetry, tracks NUI producers, counts watchers, and decides where frames are allowed to go.
 
 ## Architecture Thesis
 
@@ -11,11 +11,12 @@ Keep game runtime work minimal.
 Keep stream capture demand-driven.
 Keep routing policy centralized.
 Keep deployment boring enough to run yourself.
+Make the streaming path feel live without making it always-on.
 ```
 
-This is why the project uses a backend relay instead of P2P streaming. P2P can look impressive in a diagram, but admin tooling needs predictable auth, firewall behavior, cleanup, and policy enforcement. The relay model gives one place to own those decisions.
+This is why the project uses a backend relay instead of P2P streaming. P2P can look impressive in a diagram, but admin tooling needs predictable auth, firewall behavior, cleanup, and policy enforcement. The relay model gives one place to own those decisions, which is exactly what an operations console needs.
 
-The capture workload is still distributed: each player-side NUI client owns its own capture and encode path. The backend does not perform FiveM screenshot capture work; it coordinates demand and relays frames to authorized watchers.
+The capture workload is still distributed: each player-side NUI client owns its own capture and encode path. The backend does not perform FiveM screenshot capture work; it coordinates demand and relays frames to authorized watchers. That split is the whole trick: edge capture for cost, central control for sanity.
 
 ## High-Level Flow
 
@@ -48,7 +49,7 @@ flowchart LR
     Router -->|"stop_capture\nwhen watcher set is empty"| NUI
 ```
 
-The backend stays centralized for policy and routing. Capture work is distributed to each player-side NUI client, so the FiveM server is not doing frame processing and the backend is not running screenshot capture.
+The backend stays centralized for policy and routing. Capture work is distributed to each player-side NUI client, so the FiveM server is not doing frame processing and the backend is not running screenshot capture. The system gets the "live camera" feel without paying for constant capture.
 
 ## Runtime Components
 
@@ -61,7 +62,7 @@ Runs inside FiveM.
 - `web/index.html` captures frames through the WebGL/NUI path.
 - `web/cfx-three.min.js` provides the bundled CFX/Three capture runtime used by the NUI page.
 
-The game edge emits state and frames. It does not own routing policy.
+The game edge emits state and frames. It does the expensive visual work only when asked, and it does not own routing policy.
 
 ### Backend Control Plane
 
@@ -71,7 +72,7 @@ Runs as a Node.js service.
 - Socket.io handles realtime state and stream commands.
 - In-memory indexes track admins, NUI clients, active streams, and watcher sets.
 
-The backend owns the stream lifecycle.
+The backend owns the stream lifecycle: who can watch, which NUI should capture, who receives frames, and when capture must stop.
 
 ### Operator Dashboard
 
@@ -83,7 +84,7 @@ Runs in the browser.
 - Opens stream overlays.
 - Sends stream quality updates.
 
-The dashboard is a control surface, not the source of routing truth.
+The dashboard is a control surface, not the source of routing truth. It asks for visibility; the backend decides how that visibility is safely delivered.
 
 ## Telemetry Model
 
@@ -105,7 +106,7 @@ Properties:
 - no persistence required
 - low operational overhead
 
-This is the right trade for live visibility. Operators need current state more than historical reconstruction.
+This is the right trade for live visibility. Operators need current state more than historical reconstruction, and snapshots keep that path brutally simple.
 
 ## Stream Model
 
@@ -128,7 +129,7 @@ watcher set becomes empty
   -> NUI stops capture loop
 ```
 
-This avoids global broadcast and duplicate capture loops.
+This avoids global broadcast and duplicate capture loops. One player, one capture loop, only the watchers who asked for it.
 
 ## Capture Pipeline
 
@@ -147,7 +148,7 @@ The project bundles the required CFX/Three runtime and uses only the capture pri
 
 The resize work happens before readback by sizing the WebGL render target to `window size x resolutionScale`. The NUI then packs the scaled RGBA buffer into canvas `ImageData` and encodes that smaller frame as WebP. That means fewer pixels are copied out of the GPU and fewer bytes are encoded and relayed.
 
-Earlier versions can be implemented by forwarding screenshot-resource output through the backend. The current design is lighter: capture and encode happen at the edge, while the backend remains a control-plane relay.
+Earlier versions can be implemented by forwarding screenshot-resource output through the backend. The current design is cleaner and lighter: capture and encode happen at the edge, while the backend remains a control-plane relay instead of becoming a screenshot processing bottleneck.
 
 ## In-Memory State
 
@@ -198,7 +199,7 @@ instead of:
 active streams x all connected admins
 ```
 
-This is the important property: stream cost follows operator intent.
+This is the important property: stream cost follows operator intent. The system looks live because it is live, but it only spends real resources on streams someone actually opened.
 
 ## Trust Zones
 

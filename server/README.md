@@ -2,6 +2,8 @@
 
 Express + Socket.io service that acts as the authority for auth, telemetry ingest, stream lifecycle, and watcher-scoped frame routing.
 
+This module is where the project earns its control-plane shape: the backend does not capture frames, but it decides who is allowed to request capture, which NUI client should start, and which operators receive the resulting frames.
+
 ## Responsibilities
 
 - Authenticate dashboard users through `POST /api/auth/login`.
@@ -60,7 +62,7 @@ activeStreams     playerIds currently capturing
 streamWatchers    playerId -> admin socket set
 ```
 
-This is intentionally in memory for a lean single-node deployment.
+This is intentionally in memory for a lean single-node deployment. It keeps the hot path fast and the deployment small; external state can be added later when horizontal scale becomes real.
 
 ## API
 

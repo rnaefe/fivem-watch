@@ -1,6 +1,6 @@
 # API Reference
 
-`fivem-watch` exposes a compact control-plane API: REST for login, health, and telemetry ingest; Socket.io for realtime state, commands, and frame relay.
+`fivem-watch` exposes a compact control-plane API: REST for login, health, and telemetry ingest; Socket.io for realtime state, commands, and frame relay. The API is small on purpose: it moves live data fast while keeping stream ownership explicit.
 
 ## Base URL
 
@@ -203,4 +203,4 @@ Expected stream ranges:
 
 ## Routing Guarantee
 
-Frames are not globally broadcast. The backend relays `player_frame` only to admin sockets registered in that player's watcher set.
+Frames are not globally broadcast. The backend relays `player_frame` only to admin sockets registered in that player's watcher set, which is the core contract behind the watcher-scoped relay model.

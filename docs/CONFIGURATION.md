@@ -1,6 +1,6 @@
 # Configuration Reference
 
-`fivem-watch` has three configuration surfaces: backend environment, dashboard build-time URL, and FiveM runtime settings.
+`fivem-watch` has three configuration surfaces: backend environment, dashboard build-time URL, and FiveM runtime settings. The knobs are intentionally close to the real cost centers: auth boundary, network target, telemetry cadence, and stream weight.
 
 ## Backend: `server/.env`
 
@@ -92,7 +92,7 @@ The dashboard can push stream settings to an active NUI capture session.
 | Medium | 20 | 0.4 | 0.5 |
 | High | 30 | 0.7 | 0.8 |
 
-These changes do not require a resource restart.
+These changes do not require a resource restart. Operators can trade smoothness, clarity, and bandwidth while a stream is active.
 
 ## Secret Matching
 

@@ -2,7 +2,7 @@
 
 Self-hosted FiveM operations console with real-time player telemetry, GTA V map visibility, and demand-driven live player streaming.
 
-`fivem-watch` is built for server teams that need live context without putting staff into the game for every check. The FiveM resource pushes player state to a lightweight control plane, the dashboard renders that state on a map, and screen capture is activated only when an operator explicitly watches a player.
+`fivem-watch` is built for server teams that need live context without putting staff into the game for every check. It combines a lightweight control plane, distributed NUI capture, and watcher-scoped stream relay so operators can see what matters without turning every player client into a permanent video source.
 
 <p align="left">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green" />
@@ -16,7 +16,7 @@ Self-hosted FiveM operations console with real-time player telemetry, GTA V map 
 
 ## Engineering Highlights
 
-`fivem-watch` is designed around operational control rather than raw broadcast.
+`fivem-watch` is designed to feel powerful without being wasteful: the impressive part is live remote visibility; the operational part is that every expensive step is tied to explicit operator demand.
 
 - **Watcher-scoped relay:** the backend tracks watchers per player and sends frames only to subscribed operators.
 - **Demand-driven capture:** screen capture starts only after an authenticated operator requests a stream.
@@ -24,7 +24,7 @@ Self-hosted FiveM operations console with real-time player telemetry, GTA V map 
 - **Bundled CFX capture path:** the resource ships the required CFX/Three capture runtime directly, so it does not depend on an external screenshot resource at runtime.
 - **Custom scaled readback/packing path:** frames are rendered at the requested capture scale before pixel readback, then packed into canvas `ImageData` and encoded as WebP.
 
-The result is a lightweight observability pipeline: telemetry stays cheap, capture work is pushed to the edge, and backend bandwidth follows actual operator demand.
+The result is a sharp little observability pipeline: telemetry stays cheap, capture work moves to the edge, and backend bandwidth follows actual operator intent instead of global broadcast pressure.
 
 ```txt
 NUI frame for player #24
@@ -38,14 +38,14 @@ zero watchers means stop_capture
 
 ## Why Central Relay, Not P2P?
 
-P2P can be useful for some media systems. For an operator console, centralized relay is the stronger default.
+P2P looks attractive on paper. For an operator console, centralized relay is the stronger default because the backend is where auth, policy, cleanup, and stream ownership belong.
 
 | Choice | Looks cool | Works well for ops | Why |
 |---|---:|---:|---|
 | P2P | High | Medium | NAT, firewall, browser permission, peer churn, and policy enforcement get messy |
 | Central relay | High | High | One control plane owns auth, stream lifecycle, watcher accounting, and routing |
 
-For moderation and observability tooling, control beats novelty. The backend is not just a pipe; it is the policy and routing authority.
+For moderation and observability tooling, control beats novelty. The backend is not just a pipe; it is the thing that makes the system operable under real server conditions.
 
 The architecture is best described as:
 

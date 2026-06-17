@@ -2,7 +2,7 @@
 
 FiveM resource that produces telemetry and on-demand NUI screen frames for the `fivem-watch` control plane.
 
-The resource stays intentionally thin: it collects state, initializes hidden NUI capture, and obeys backend capture commands. Stream routing, auth decisions, and watcher accounting belong to the backend.
+The resource stays intentionally thin, but the capture path is where the project gets interesting: it bundles the needed CFX/Three primitives, captures through hidden NUI, scales before readback, packs pixels into `ImageData`, and ships WebP frames without requiring an external screenshot resource at runtime.
 
 ## Responsibilities
 
@@ -42,7 +42,7 @@ CfxTexture
 
 The render target is created at `viewport x STREAM_RESOLUTION_SCALE`, so resize happens before GPU readback instead of after a full-resolution copy. The scaled RGBA buffer is then packed into canvas `ImageData` and encoded as WebP. At `0.4` scale, that cuts pixel transfer substantially before the frame is encoded.
 
-This keeps the resource independent from a separate screenshot runtime while still reusing the necessary CFX/Three capture primitives in a bundled form.
+This keeps the resource independent from a separate screenshot runtime while still reusing the necessary CFX/Three capture primitives in a bundled form. The result is edge-side image processing with backend-controlled stream lifecycle.
 
 ## Configuration
 
@@ -92,7 +92,7 @@ backend start_capture -> NUI capture loop -> frame events
 backend stop_capture  -> NUI capture loop stops
 ```
 
-No capture loop runs while nobody is watching.
+No capture loop runs while nobody is watching. That is the operational win behind the live-stream feature.
 
 ## Tuning
 

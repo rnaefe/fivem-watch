@@ -2,7 +2,7 @@
 
 React operator console for live FiveM visibility.
 
-The dashboard is the human-facing control surface: login, player list, GTA V map, stream windows, and runtime stream quality controls. Routing authority stays in the backend.
+The dashboard is the human-facing control surface: login, player list, GTA V map, stream windows, and runtime stream quality controls. It feels like the command center, but routing authority stays in the backend where policy and cleanup can be enforced.
 
 ## Responsibilities
 
@@ -13,6 +13,8 @@ The dashboard is the human-facing control surface: login, player list, GTA V map
 - Start and stop player streams.
 - Display multiple live stream overlays.
 - Push quality preset changes to active captures.
+
+The dashboard asks for visibility; it does not own the stream lifecycle. That split keeps the UI responsive without making the browser the source of truth.
 
 ## Stack
 
