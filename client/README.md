@@ -1,43 +1,18 @@
 # fivem-watch Dashboard (`client`)
 
-![Module](https://img.shields.io/badge/module-client-0ea5e9)
-![Runtime](https://img.shields.io/badge/runtime-Node%2018%2B-22c55e)
-![Framework](https://img.shields.io/badge/framework-React%2019-61dafb)
-![Bundler](https://img.shields.io/badge/bundler-Vite%208-646cff)
+React operator console for live FiveM visibility.
 
-Operator-facing React application for real-time FiveM monitoring.
+The dashboard is the human-facing control surface: login, player list, GTA V map, stream windows, and runtime stream quality controls. Routing authority stays in the backend.
 
-## Table of Contents
+## Responsibilities
 
-- [Purpose](#purpose)
-- [Compatibility Matrix](#compatibility-matrix)
-- [Stack](#stack)
-- [Local Development](#local-development)
-- [Environment](#environment)
-- [Scripts](#scripts)
-- [Module Contract](#module-contract)
-- [Map Data](#map-data)
-- [Key Files](#key-files)
-- [Troubleshooting](#troubleshooting)
-
-## Purpose
-
-This module provides the admin control surface for:
-
-- authenticating operators,
-- observing live player telemetry on a GTA V map,
-- starting/stopping live streams per player,
-- adjusting stream quality presets at runtime.
-
-## Compatibility Matrix
-
-| Component | Version |
-|---|---|
-| Node.js | 18+ |
-| npm | 9+ |
-| React | 19.x |
-| Vite | 8.x |
-| Socket.io Client | 4.x |
+- Authenticate through the backend.
+- Maintain an authenticated Socket.io connection.
+- Render current player telemetry.
+- Place players on the GTA V satellite map.
+- Start and stop player streams.
+- Display multiple live stream overlays.
+- Push quality preset changes to active captures.
 
 ## Stack
 
@@ -46,6 +21,7 @@ This module provides the admin control surface for:
 - Socket.io Client
 - Leaflet + React-Leaflet
 - Framer Motion
+- Phosphor Icons
 
 ## Local Development
 
@@ -54,9 +30,11 @@ npm install
 npm run dev
 ```
 
-Default URL: `http://localhost:5173`
+Default URL:
 
-## Environment
+```txt
+http://localhost:5173
+```
 
 Optional `.env`:
 
@@ -64,48 +42,53 @@ Optional `.env`:
 VITE_SERVER_URL=http://localhost:3001
 ```
 
-If omitted, the dashboard connects to `http://localhost:3001`.
-
 ## Scripts
 
-- `npm run dev` — start development server
-- `npm run build` — create production build
-- `npm run preview` — preview build output
-- `npm run lint` — run ESLint checks
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Start Vite dev server |
+| `npm run build` | Build production assets |
+| `npm run preview` | Preview production build |
+| `npm run lint` | Run ESLint |
 
-## Module Contract
+## Contract With Backend
 
-- Authenticates through backend `POST /api/auth/login` token flow.
-- Subscribes to `players_update` for telemetry state.
-- Subscribes to `player_frame` for stream rendering.
-- Emits `start_stream`, `stop_stream`, and `update_stream_config` commands.
+Receives:
 
-## Operational Notes
+- `players_update`
+- `player_frame`
+- `stream_started`
+- `stream_stopped`
+- `stream_error`
+- `server_offline`
 
-- Socket auth uses token returned by backend `POST /api/auth/login`.
-- The dashboard subscribes to `players_update` and `player_frame` events.
-- Stream windows are independent; multiple players can be watched in parallel.
+Emits:
+
+- `start_stream`
+- `stop_stream`
+- `update_stream_config`
 
 ## Map Data
 
 Expected tile path:
 
-`public/styleSatelite/{z}/{x}/{y}.jpg`
+```txt
+public/styleSatelite/{z}/{x}/{y}.jpg
+```
 
-If tiles are missing, the map will render without satellite imagery.
+Markers can still render without tiles, but the satellite map will appear blank.
 
 ## Key Files
 
-- `src/App.jsx` — root state orchestration and socket lifecycle
-- `src/socket.js` — singleton socket connection layer
-- `src/components/LoginScreen.jsx` — credential-based login flow
-- `src/components/PlayerList.jsx` — searchable player list + stream actions
-- `src/components/GameMap.jsx` — custom CRS map projection + markers
-- `src/components/LiveStream.jsx` — stream viewport, quality presets, fullscreen
+- `src/App.jsx` - app state and socket lifecycle
+- `src/socket.js` - singleton Socket.io client
+- `src/components/LoginScreen.jsx` - login flow
+- `src/components/PlayerList.jsx` - search and stream actions
+- `src/components/GameMap.jsx` - custom CRS and map markers
+- `src/components/LiveStream.jsx` - stream overlay and quality presets
 
-## Troubleshooting
+## Related Docs
 
-- **Cannot reach backend**: verify `VITE_SERVER_URL` and backend availability.
-- **Login rejected**: validate backend credentials in `server/.env`.
-- **No players shown**: check ingest path and `API_SECRET` parity.
-- **No stream frames**: confirm NUI connection from target player.
+- [Root README](../README.md)
+- [API Reference](../docs/API.md)
+- [Configuration](../docs/CONFIGURATION.md)

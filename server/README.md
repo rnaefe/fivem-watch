@@ -1,48 +1,22 @@
 # fivem-watch Control Plane (`server`)
 
-![Module](https://img.shields.io/badge/module-server-10b981)
-![Runtime](https://img.shields.io/badge/runtime-Node%2018%2B-22c55e)
-![API](https://img.shields.io/badge/api-Express%204.x-black)
-![WebSocket](https://img.shields.io/badge/socket.io-4.x-1f2937)
-
-Express + Socket.io backend that authenticates operators, ingests telemetry, and relays live player frames.
-
-## Table of Contents
-
-- [Responsibilities](#responsibilities)
-- [Compatibility Matrix](#compatibility-matrix)
-- [Tech Stack](#tech-stack)
-- [Setup](#setup)
-- [Environment Variables](#environment-variables)
-- [REST API](#rest-api)
-- [Socket Roles](#socket-roles)
-- [Internal State Model](#internal-state-model)
-- [Production Guidance](#production-guidance)
-- [Related Docs](#related-docs)
+Express + Socket.io service that acts as the authority for auth, telemetry ingest, stream lifecycle, and watcher-scoped frame routing.
 
 ## Responsibilities
 
-- Authenticate dashboard users via `POST /api/auth/login`
-- Accept telemetry snapshots from FiveM via `POST /api/ingest`
-- Maintain in-memory player and stream routing state
-- Coordinate stream lifecycle between admins and NUI clients
-- Expose health metrics via `GET /api/health`
+- Authenticate dashboard users through `POST /api/auth/login`.
+- Accept player snapshots through `POST /api/ingest`.
+- Maintain current player state in memory.
+- Track admin sockets and player NUI sockets.
+- Start capture only when a watcher exists.
+- Relay frames only to operators subscribed to that player.
+- Stop capture when the watcher set becomes empty.
 
-## Compatibility Matrix
+## Stack
 
-| Component | Version |
-|---|---|
-| Node.js | 18+ |
-| npm | 9+ |
-| Express | 4.x |
-| Socket.io | 4.x |
-| dotenv | 16.x |
-
-## Tech Stack
-
-- Node.js
-- Express
-- Socket.io
+- Node.js 18+
+- Express 4
+- Socket.io 4
 - dotenv
 - cors
 
@@ -54,13 +28,13 @@ cp .env.example .env
 npm start
 ```
 
-Development mode:
+Development:
 
 ```bash
 npm run dev
 ```
 
-## Environment Variables
+## Environment
 
 ```env
 PORT=3001
@@ -70,108 +44,50 @@ ADMIN_PASSWORD=CHANGE_ME
 CORS_ORIGIN=http://localhost:5173
 ```
 
-### Notes
+Notes:
 
 - `API_SECRET` must match `fivem-watch-resource/config.js`.
 - `CORS_ORIGIN` supports `*` or comma-separated origins.
-- Rotate secrets and credentials before production usage.
+- Production should use exact origins and rotated secrets.
 
-## REST API
+## Runtime State
 
-### `POST /api/auth/login`
-
-Request body:
-
-```json
-{ "username": "admin", "password": "your_password" }
+```txt
+playersState      latest player snapshot
+nuiClients        playerId -> NUI socket id
+adminSockets      authenticated dashboard sockets
+activeStreams     playerIds currently capturing
+streamWatchers    playerId -> admin socket set
 ```
 
-Success response:
+This is intentionally in memory for a lean single-node deployment.
 
-```json
-{ "success": true, "token": "<secret>" }
-```
+## API
 
-### `POST /api/ingest`
-
-Headers:
-
-- `x-api-key: <API_SECRET>`
-
-Body:
-
-- Array of player telemetry objects.
-
-### `GET /api/health`
-
-Returns service status and runtime counters:
-
-- players
-- active streams
-- connected admins
-- process uptime
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/auth/login` | Operator login |
+| `GET` | `/api/health` | Health and counters |
+| `POST` | `/api/ingest` | FiveM telemetry snapshot |
 
 ## Socket Roles
 
-### `admin`
-
-Receives:
-
-- `players_update`
-- `player_frame`
-- `stream_error`
-- `server_offline`
-
-Emits:
-
-- `start_stream`
-- `stop_stream`
-- `update_stream_config`
-
-### `fivem-server`
-
-Emits:
-
-- `players_update`
-
-### `fivem-nui`
-
-Receives:
-
-- `start_capture`
-- `stop_capture`
-- `update_config`
-
-Emits:
-
-- `frame`
-
-## Internal State Model
-
-Current runtime state (in-memory):
-
-- `playersState`
-- `nuiClients`
-- `activeStreams`
-- `adminSockets`
-- `streamWatchers`
-
-This design keeps latency low, but state is ephemeral across process restarts.
-
-Service boundary note:
-
-- This module is the policy/routing authority between admins, FiveM telemetry producer, and NUI media producers.
-- It does not persist historical events; current-state routing is in memory by design.
+| Role | Purpose |
+|---|---|
+| `admin` | Dashboard control and viewing socket |
+| `fivem-nui` | Hidden player-side capture socket |
+| `fivem-server` | Socket telemetry compatibility role |
 
 ## Production Guidance
 
-- Run behind reverse proxy with TLS.
-- Restrict inbound access by network policy.
-- Use process supervision (`pm2`, `systemd`, or containers).
-- Add centralized logging and alerting.
-- Consider JWT + RBAC if exposing outside trusted networks.
+- Run behind TLS.
+- Restrict inbound access where possible.
+- Supervise the process with `systemd`, `pm2`, or containers.
+- Add rate limiting before public exposure.
+- Move to JWT/RBAC if multiple operator roles are needed.
 
 ## Related Docs
 
-- Root architecture: `../TECHNICAL-ARCHITECTURE.md`
-- Installation runbook: `../INSTALL.md`
+- [Root README](../README.md)
+- [Architecture](../TECHNICAL-ARCHITECTURE.md)
+- [API Reference](../docs/API.md)

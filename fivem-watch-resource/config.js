@@ -2,7 +2,7 @@
  * config.js — Shared configuration for fivem-watch resource.
  *
  * This file is loaded by BOTH server and client scripts.
- * Edit these values to match your fivem-watch-web backend.
+ * Edit these values to match your fivem-watch backend.
  *
  * @module Config
  */
@@ -10,7 +10,7 @@
 /** @type {Object} Global configuration */
 const FW_CONFIG = {
   /**
-   * URL of the fivem-watch-web backend server.
+   * URL of the fivem-watch backend server.
    * Include the protocol and port, no trailing slash.
    * Example: "http://123.45.67.89:3001"
    */
@@ -38,7 +38,7 @@ const FW_CONFIG = {
   STREAM_FPS: 20,
 
   /**
-   * JPEG compression quality for captured frames.
+   * WebP compression quality for captured frames.
    * Range: 0.0 (worst) to 1.0 (best)
    * Recommended: 0.6 for a good size/quality balance.
    */

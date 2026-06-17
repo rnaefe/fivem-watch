@@ -1,54 +1,50 @@
 # fivem-watch FiveM Runtime (`fivem-watch-resource`)
 
-![Module](https://img.shields.io/badge/module-fivem--resource-f59e0b)
-![FiveM](https://img.shields.io/badge/fx_version-cerulean-3b82f6)
-![Game](https://img.shields.io/badge/game-gta5-16a34a)
-![Capture](https://img.shields.io/badge/capture-WebGL%20NUI-8b5cf6)
+FiveM resource that produces telemetry and on-demand NUI screen frames for the `fivem-watch` control plane.
 
-FiveM resource responsible for telemetry collection and on-demand screen capture from client NUI.
+The resource stays intentionally thin: it collects state, initializes hidden NUI capture, and obeys backend capture commands. Stream routing, auth decisions, and watcher accounting belong to the backend.
 
-## Table of Contents
+## Responsibilities
 
-- [What this resource does](#what-this-resource-does)
-- [Compatibility Matrix](#compatibility-matrix)
-- [File Structure](#file-structure)
-- [Configuration](#configuration)
-- [Installation on FiveM](#installation-on-fivem)
-- [Runtime Behavior](#runtime-behavior)
-- [Dependencies](#dependencies)
-- [Troubleshooting](#troubleshooting)
-- [Security Notes](#security-notes)
-- [Related Docs](#related-docs)
+- Collect connected player telemetry at a fixed interval.
+- Send full snapshots to backend `/api/ingest`.
+- Bootstrap a hidden NUI page on player clients.
+- Connect NUI clients to the backend as `fivem-nui`.
+- Capture frames only after `start_capture`.
+- Stop capture after `stop_capture`.
+- Apply runtime stream settings without resource restart.
+- Use a bundled CFX/Three capture runtime instead of requiring an external screenshot resource at runtime.
 
-## What this resource does
+## Files
 
-- Collects connected player telemetry server-side at fixed intervals
-- Sends snapshots to backend `/api/ingest` with API key header
-- Bootstraps hidden NUI on clients for stream capture
-- Captures game frames via WebGL and sends to backend socket relay
-
-## Compatibility Matrix
-
-| Component | Version / Requirement |
+| File | Purpose |
 |---|---|
-| FiveM FX Version | `cerulean` |
-| Game | `gta5` |
-| Backend API | `fivem-watch/server` reachable via `BACKEND_URL` |
-| Shared Secret | Must match backend `API_SECRET` |
+| `fxmanifest.lua` | Resource manifest |
+| `config.js` | Shared backend and stream config |
+| `server/main.js` | Telemetry collector and HTTP publisher |
+| `client/main.js` | NUI bootstrap bridge |
+| `web/index.html` | WebGL capture engine |
+| `web/socket.io.min.js` | Bundled Socket.io client |
+| `web/cfx-three.min.js` | Bundled CFX Three.js integration |
 
-## File Structure
+## Capture Pipeline
 
-- `fxmanifest.lua` — resource manifest and file declarations
-- `config.js` — shared runtime configuration
-- `server/main.js` — telemetry collector and HTTP publisher
-- `client/main.js` — NUI init bridge
-- `web/index.html` — WebGL capture engine and socket client
-- `web/socket.io.min.js` — bundled socket.io client
-- `web/cfx-three.min.js` — bundled CFX Three.js integration
+The NUI capture path is self-contained inside this resource.
+
+```txt
+CfxTexture
+  -> scaled WebGL render target
+  -> pixel readback
+  -> packed canvas ImageData
+  -> WebP encode
+  -> Socket.io frame
+```
+
+The render target is created at `viewport x STREAM_RESOLUTION_SCALE`, so resize happens before GPU readback instead of after a full-resolution copy. The scaled RGBA buffer is then packed into canvas `ImageData` and encoded as WebP. At `0.4` scale, that cuts pixel transfer substantially before the frame is encoded.
+
+This keeps the resource independent from a separate screenshot runtime while still reusing the necessary CFX/Three capture primitives in a bundled form.
 
 ## Configuration
-
-Edit `config.js`:
 
 ```js
 const FW_CONFIG = {
@@ -61,61 +57,52 @@ const FW_CONFIG = {
 };
 ```
 
-### Tuning Recommendations
+`API_SECRET` must match the backend.
 
-- Lower `STREAM_RESOLUTION_SCALE` first for bandwidth savings.
-- Lower `STREAM_FPS` if client CPU usage is high.
-- Lower `STREAM_QUALITY` if artifacts are acceptable.
+## Installation
 
-## Installation on FiveM
+Copy this folder into FiveM `resources/`.
 
-1. Copy resource folder into server `resources/`.
-2. Ensure resource name/path consistency:
-   - Preferred resource name: `fivem-watch`
-   - If using another name, update NUI paths in `fxmanifest.lua` and `web/index.html`.
-3. Add to `server.cfg`:
+Recommended path:
 
-```cfg
-ensure fivem-watch
+```txt
+resources/fivem-watch-resource
 ```
 
-## Module Contract
+Add to `server.cfg`:
 
-- Produces telemetry snapshots to backend ingest endpoint.
-- Produces stream frames only when backend instructs `start_capture`.
-- Accepts dynamic stream config updates (`streamFps`, `resolutionScale`, `streamQuality`) without resource restart.
+```cfg
+ensure fivem-watch-resource
+```
+
+Resource naming matters. `web/index.html` currently references `nui://fivem-watch-resource/...`; update those paths if the folder is renamed.
 
 ## Runtime Behavior
 
-- Telemetry loop runs every `TELEMETRY_INTERVAL` milliseconds.
-- NUI capture loop is inactive until backend sends `start_capture`.
-- On zero watchers, backend sends `stop_capture` and capture loop stops.
+Telemetry:
 
-## Dependencies
+```txt
+setInterval -> collect players -> POST /api/ingest
+```
 
-- No database required.
-- No external screenshot resource required.
-- Uses Node built-in `http` module in FiveM server script.
+Streaming:
 
-## Troubleshooting
+```txt
+backend start_capture -> NUI capture loop -> frame events
+backend stop_capture  -> NUI capture loop stops
+```
 
-- **No telemetry in dashboard**:
-  - Check `BACKEND_URL` reachability from FiveM host.
-  - Validate `API_SECRET` matches backend env.
-- **Stream does not start**:
-  - Confirm client loaded resource and NUI connected.
-  - Check backend logs for NUI client registration.
-- **Resource loads but no capture**:
-  - Verify Web assets listed in `fxmanifest.lua` are present.
+No capture loop runs while nobody is watching.
 
-## Security Notes
+## Tuning
 
-- Treat `API_SECRET` as sensitive and rotate periodically.
-- Avoid exposing backend directly to untrusted networks.
-- Prefer private networking between FiveM host and backend.
+- Lower `STREAM_RESOLUTION_SCALE` first for bandwidth reduction.
+- Lower `STREAM_FPS` for CPU and network relief.
+- Lower `STREAM_QUALITY` when rough visual context is enough.
 
 ## Related Docs
 
-- Root project docs: `../README.md`
-- Install guide: `../INSTALL.md`
-- Architecture guide: `../TECHNICAL-ARCHITECTURE.md`
+- [Root README](../README.md)
+- [Install Guide](../INSTALL.md)
+- [Architecture](../TECHNICAL-ARCHITECTURE.md)
+- [Configuration](../docs/CONFIGURATION.md)

@@ -1,89 +1,85 @@
 # Contributing to fivem-watch
 
-Thank you for contributing.
+Thanks for helping improve `fivem-watch`.
 
-## Goals
+This project is an operations tool. Changes should preserve live-server stability, clear runtime contracts, and boring deployment.
 
-- Keep changes focused and easy to review.
-- Preserve runtime stability for live servers.
-- Keep documentation aligned with behavior changes.
+## Contribution Principles
+
+- Keep changes scoped to one concern.
+- Prefer explicit control-plane logic over clever abstraction.
+- Preserve existing REST and Socket.io contracts unless the change is intentionally breaking.
+- Update docs when behavior, config, events, or deployment steps change.
+- Treat stream performance and cleanup paths as production concerns.
 
 ## Development Setup
 
-1. Install dependencies:
-   - `cd server && npm install`
-   - `cd client && npm install`
-2. Copy server env:
-   - `cd server && cp .env.example .env`
-3. Start services:
-   - `cd server && npm run dev`
-   - `cd client && npm run dev`
+```bash
+cd server
+npm install
+cp .env.example .env
+npm run dev
+```
 
-## Branching Strategy
+```bash
+cd client
+npm install
+npm run dev
+```
 
-- Branch from `main`.
-- Use short-lived feature/fix branches.
-- Naming examples:
-  - `feat/multi-admin-stream-controls`
-  - `fix/nui-reconnect-timeout`
-  - `docs/install-runbook-update`
+## Branch Naming
 
-## Commit Convention
+Examples:
 
-Use conventional-style commit messages:
+- `feat/stream-quality-presets`
+- `fix/watcher-cleanup`
+- `docs/control-plane-architecture`
+- `perf/frame-scale-tuning`
+
+## Commit Style
+
+Use short conventional commits:
 
 - `feat: add stream watcher cleanup`
-- `fix: prevent duplicate start_capture emit`
-- `docs: update installation topology section`
-- `refactor: simplify socket role validation`
+- `fix: reject invalid nui sockets`
+- `docs: clarify relay architecture`
+- `perf: reduce default capture scale`
 
 ## Pull Request Checklist
 
-Before opening a PR:
+- [ ] Scope is focused.
+- [ ] Backend starts successfully.
+- [ ] Dashboard builds or the reason it was not run is documented.
+- [ ] Login was smoke-tested when auth changed.
+- [ ] Player telemetry was smoke-tested when ingest changed.
+- [ ] Stream start/stop was smoke-tested when socket or NUI behavior changed.
+- [ ] Docs were updated for behavior/config/API changes.
 
-- [ ] Changes are scoped to one logical concern.
-- [ ] `client` builds successfully (`npm run build`).
-- [ ] Lint passes in `client` (`npm run lint`).
-- [ ] Manual smoke test completed:
-  - [ ] login works
-  - [ ] players list updates
-  - [ ] stream start/stop works
-- [ ] Documentation updated when behavior/config changed.
-
-## PR Description Template
+## PR Description
 
 Include:
 
-1. **Problem** — what issue this solves.
-2. **Approach** — key implementation decisions.
-3. **Impact** — risk areas and compatibility notes.
-4. **Validation** — commands/tests/manual checks performed.
+1. **Problem** - what this fixes or enables.
+2. **Approach** - the important implementation decision.
+3. **Impact** - compatibility, performance, security, or deployment notes.
+4. **Validation** - commands and manual checks performed.
 
-## Coding Guidelines
+## Security
 
-- Prefer simple and explicit logic over abstraction-heavy patterns.
-- Avoid unrelated refactors in the same PR.
-- Keep public event/API contracts backward compatible when possible.
-- If contract changes are required, update:
-  - `README.md`
-  - `INSTALL.md`
-  - `TECHNICAL-ARCHITECTURE.md`
-  - relevant module README files
+- Never commit `.env`, tokens, or private keys.
+- Treat `API_SECRET` as sensitive.
+- Rotate secrets if exposed.
+- Report security-sensitive issues privately before publishing details.
 
-## Security Guidelines
+## Documentation Standard
 
-- Never commit secrets (`.env`, tokens, private keys).
-- Treat `API_SECRET` as sensitive and rotate if exposed.
-- Report security issues privately to maintainers.
+Docs should be:
 
-## Documentation Standards
-
-When updating docs:
-
-- Keep examples copy-paste ready.
-- Use actual defaults from source code.
-- Prefer operational language (what to run, where, expected outcome).
+- accurate to source behavior
+- copy-paste ready where commands are shown
+- clear about trade-offs
+- professional enough to sell the architecture without inventing features
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the project MIT license.
+By contributing, you agree your contributions are licensed under the MIT license.

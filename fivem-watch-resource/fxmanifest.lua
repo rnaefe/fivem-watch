@@ -11,11 +11,11 @@
   HOW IT WORKS:
   1. Server script periodically collects player telemetry
      (ID, name, coords, health, armor, ping) and pushes it
-     to the fivem-watch-web backend via HTTP.
+     to the fivem-watch backend via HTTP.
   2. Client script runs a hidden NUI page that maintains a
      WebSocket connection to the backend. When an admin requests
      a live stream, the NUI captures the game screen using
-     WebGL and sends JPEG frames over the socket.
+     WebGL and sends WebP frames over the socket.
 ]]
 
 fx_version 'cerulean'

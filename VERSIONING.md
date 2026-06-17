@@ -1,38 +1,55 @@
 # Versioning & Release Policy
 
-This project follows Semantic Versioning (`MAJOR.MINOR.PATCH`).
+`fivem-watch` follows Semantic Versioning:
 
-## Versioning Rules
+```txt
+MAJOR.MINOR.PATCH
+```
 
-- **MAJOR**: breaking changes to API/event/config contracts.
-- **MINOR**: backward-compatible features.
-- **PATCH**: backward-compatible bug fixes and documentation-only corrections.
+## Version Rules
 
-## What is considered breaking
+| Version | Use when |
+|---|---|
+| `MAJOR` | REST, Socket.io, config, or deployment contracts break |
+| `MINOR` | Backward-compatible capabilities are added |
+| `PATCH` | Backward-compatible fixes or documentation corrections ship |
 
-Examples:
+## Breaking Changes
 
-- Renaming/removing socket events used by dashboard or NUI.
-- Changing required env/config keys without fallback.
-- Altering payload shapes consumed by existing clients.
+These require a major release:
 
-## Release Workflow
+- Renaming or removing Socket.io events.
+- Changing required REST payload shapes.
+- Changing required config keys without fallback.
+- Changing resource folder assumptions without migration notes.
+- Changing auth behavior in a way that invalidates existing deployments.
 
-1. Finalize changes in `main`.
-2. Update `CHANGELOG.md`:
-   - Move items from `[Unreleased]` into the new version section.
-3. Create release commit:
-   - Update docs/version references if needed.
-4. Create git tag:
-   - `vX.Y.Z`
-5. Publish release notes from changelog highlights.
+## Release Checklist
+
+1. Confirm backend and dashboard versions.
+2. Update relevant docs.
+3. Include migration notes for breaking changes.
+4. Tag the release as `vX.Y.Z`.
+5. Publish concise release notes with:
+   - highlights
+   - compatibility notes
+   - upgrade steps if needed
 
 ## Compatibility Promise
 
-- Patch and minor releases aim to preserve existing setup and runtime contracts.
-- Breaking contract changes require a major version and migration notes.
+Patch and minor releases should preserve existing deployments.
 
-## Recommended PR Labels
+The core contracts are:
+
+- `POST /api/ingest`
+- `POST /api/auth/login`
+- Socket roles: `admin`, `fivem-nui`, `fivem-server`
+- Stream events: `start_stream`, `stop_stream`, `start_capture`, `stop_capture`, `player_frame`
+- config keys in `server/.env` and `fivem-watch-resource/config.js`
+
+## Labels
+
+Recommended release labels:
 
 - `breaking-change`
 - `feature`
@@ -41,6 +58,6 @@ Examples:
 - `security`
 - `performance`
 
-## Backport Policy
+## Backports
 
-At this stage, no LTS branch is maintained. Critical fixes are applied to latest stable release.
+No LTS branch is maintained yet. Critical fixes should land on the latest stable release.

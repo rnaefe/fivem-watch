@@ -1,6 +1,8 @@
 <!--
   fivem-watch - Hidden NUI Page
-  Mirrors screenshot-basic exact approach.
+  Self-contained CFX/Three capture path.
+  Uses the required CfxTexture/WebGL primitives without depending on an
+  external screenshot resource at runtime.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -98,7 +100,7 @@ function init() {
   renderer.setSize(rw, rh);
   renderer.autoClear = false;
 
-  // Append to DOM (like screenshot-basic)
+  // Append hidden renderer to keep the CFX texture pipeline alive
   const appEl = document.getElementById('app');
   appEl.appendChild(renderer.domElement);
   appEl.style.display = 'none'; // hide it
@@ -174,7 +176,7 @@ function processCapture() {
   const d = new Uint8ClampedArray(read.buffer);
   outputCtx.putImageData(new ImageData(d, scaledWidth, scaledHeight), 0, 0);
 
-  // Encode via base64 WEBP (way faster on Chromium browsers than JPEG)
+  // Encode as WebP data URL for compact browser-native transport
   const dataUrl = outputCanvas.toDataURL('image/webp', config.streamQuality);
 
   // Send

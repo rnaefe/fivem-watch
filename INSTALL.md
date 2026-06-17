@@ -1,29 +1,36 @@
 # Installation & Operations Guide
 
-This guide is written for both local setup and production deployment of `fivem-watch`.
+This guide gets `fivem-watch` from clone to live operator console.
 
-## 1) Prerequisites
+The deployment model is intentionally lean: one Node.js control plane, one static dashboard, and one FiveM resource. No database is required for the current single-node version.
 
-- Node.js 18+ (LTS recommended)
+## 1. Prerequisites
+
+- Node.js 18+
 - npm 9+
-- A reachable FiveM host
-- Network route from FiveM host → backend API
-- Network route from admin browsers → backend API
+- FiveM server with JavaScript resource support
+- Network path from FiveM host to backend
+- Network path from operator browsers to backend
 
-## 2) Choose Deployment Topology
+## 2. Recommended Topology
 
-### Topology A — Single host (small communities)
+Development:
 
-- Backend API and dashboard run on one machine.
-- FiveM server points to that machine via `BACKEND_URL`.
+```txt
+FiveM server -> local/LAN backend
+operator browser -> Vite dashboard
+```
 
-### Topology B — Split host (recommended)
+Production:
 
-- Backend API on a private/internal host.
-- Dashboard served via reverse proxy (TLS) on public edge.
-- FiveM host communicates with backend over private link/VPN.
+```txt
+FiveM server -> backend control plane
+operator browser -> HTTPS reverse proxy -> dashboard/API
+```
 
-## 3) Backend Provisioning
+The backend should be treated as the control boundary. It owns auth, ingest validation, stream lifecycle, and watcher-scoped frame routing.
+
+## 3. Backend Setup
 
 ```bash
 cd server
@@ -41,42 +48,85 @@ ADMIN_PASSWORD=CHANGE_ME
 CORS_ORIGIN=http://localhost:5173
 ```
 
-Operational guidance:
+Generate a production secret:
 
-- `API_SECRET` must be long and random; rotate periodically.
-- `CORS_ORIGIN` should be explicit origins in production (comma-separated).
-- Never commit `.env` into version control.
+```bash
+openssl rand -hex 32
+```
 
-## 4) Dashboard Provisioning
+Start:
+
+```bash
+npm start
+```
+
+Development mode:
+
+```bash
+npm run dev
+```
+
+Health check:
+
+```bash
+curl http://localhost:3001/api/health
+```
+
+Expected response shape:
+
+```json
+{
+  "status": "ok",
+  "players": 0,
+  "streams": 0,
+  "admins": 0,
+  "uptime": 12.34
+}
+```
+
+## 4. Dashboard Setup
 
 ```bash
 cd client
 npm install
+npm run dev
 ```
 
-Only if backend URL differs from default, create `client/.env`:
+Default URL:
+
+```txt
+http://localhost:5173
+```
+
+If the backend is not local, create `client/.env`:
 
 ```env
-VITE_SERVER_URL=http://YOUR_BACKEND_IP:3001
+VITE_SERVER_URL=http://YOUR_BACKEND_HOST:3001
 ```
 
-For production static build:
+Production build:
 
 ```bash
-cd client
 npm run build
 ```
 
-Serve generated assets behind Nginx/Caddy/Traefik with HTTPS.
+Serve `client/dist/` behind the same HTTPS edge as the API or another trusted static host.
 
-## 5) FiveM Resource Provisioning
+## 5. FiveM Resource Setup
 
-1. Copy `fivem-watch-resource` into `resources/`.
-2. Update `fivem-watch-resource/config.js`:
+Copy `fivem-watch-resource/` into FiveM `resources/`.
+
+Recommended path:
+
+```txt
+resources/fivem-watch-resource
+```
+
+Edit `fivem-watch-resource/config.js`:
 
 ```js
 const FW_CONFIG = {
-  BACKEND_URL: 'http://YOUR_BACKEND_IP:3001',
+  BACKEND_URL: 'http://YOUR_BACKEND_HOST:3001',
   API_SECRET: 'MATCH_SERVER_ENV_API_SECRET',
   TELEMETRY_INTERVAL: 1000,
   STREAM_FPS: 20,
@@ -85,99 +135,98 @@ const FW_CONFIG = {
 };
 ```
 
-3. Add to `server.cfg`:
+Add to `server.cfg`:
 
 ```cfg
-ensure fivem-watch
+ensure fivem-watch-resource
 ```
 
-Important naming rule:
+Resource naming matters because `web/index.html` loads bundled assets through `nui://fivem-watch-resource/...`. If the folder name changes, update those NUI paths.
 
-- If resource folder remains `fivem-watch-resource`, rename it to `fivem-watch` or update NUI path references in `fxmanifest.lua` and `web/index.html`.
+## 6. Start Order
 
-## 6) Start Sequence
+1. Start backend.
+2. Start or serve dashboard.
+3. Start/restart FiveM resource.
+4. Login to the dashboard.
+5. Confirm player telemetry appears.
+6. Start and stop one stream to verify capture lifecycle.
 
-1. Start backend:
+## 7. Production Baseline
 
-```bash
-cd server
-npm start
-```
+- Replace default admin credentials.
+- Keep `API_SECRET` long and private.
+- Use exact `CORS_ORIGIN` values.
+- Terminate TLS at a reverse proxy.
+- Restrict backend ingress where possible.
+- Run the backend with `systemd`, `pm2`, Docker, or another supervisor.
+- Keep `.env` and resource config out of public repositories.
 
-2. Start dashboard (development):
+## 8. Performance Tuning
 
-```bash
-cd client
-npm run dev
-```
-
-3. Start/restart FiveM server.
-
-4. Open dashboard and authenticate using `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
-
-## 7) Post-Install Validation (Runbook)
-
-### Control-plane checks
-
-- `GET /api/health` returns `status: ok`.
-- Backend logs show admin socket connection.
-
-### Telemetry checks
-
-- Player list updates at expected interval.
-- Map markers move as player positions change.
-
-### Stream checks
-
-- Start stream for one player.
-- Backend logs indicate NUI connection and stream start.
-- Frame appears in operator dashboard.
-- Stop stream and verify stream loop terminates.
-
-## 8) Security Hardening Baseline
-
-- Replace default credentials before first public exposure.
-- Restrict `CORS_ORIGIN` to trusted origins.
-- Restrict backend ingress via firewall/security group.
-- Use TLS termination for dashboard/API paths.
-- Add process supervision (`systemd`, `pm2`, or containers).
-- Centralize logs and alert on repeated auth failures.
-
-## 9) Performance Tuning Strategy
-
-When under load, tune in this order:
+Stream load is the expensive path. Tune in this order:
 
 1. Lower `STREAM_RESOLUTION_SCALE`.
 2. Lower `STREAM_FPS`.
 3. Lower `STREAM_QUALITY`.
-4. Increase backend resources and websocket capacity.
 
-Telemetry load is usually secondary to frame throughput.
+Dashboard presets:
 
-## 10) Troubleshooting Matrix
+| Preset | FPS | Scale | Quality |
+|---|---:|---:|---:|
+| Low | 10 | 0.2 | 0.3 |
+| Medium | 20 | 0.4 | 0.5 |
+| High | 30 | 0.7 | 0.8 |
 
-- **No players visible**
-  - Verify `API_SECRET` parity between backend and resource config.
-  - Verify FiveM host can reach `BACKEND_URL`.
-- **Login fails or unreachable**
-  - Verify backend process is healthy and `VITE_SERVER_URL` is correct.
-  - Check CORS origin policy.
-- **Stream fails with NUI not connected**
-  - Confirm resource loaded on client and NUI socket established.
-  - Check resource naming/path mismatch.
-- **Map appears empty**
-  - Verify tile tree exists under `client/public/styleSatelite/`.
+Telemetry is cheap. Frame throughput is where bandwidth and CPU matter.
 
-## 11) Upgrade Procedure
+## 9. Validation Runbook
 
-1. Back up current `.env` and `fivem-watch-resource/config.js`.
-2. Deploy new code to backend and dashboard.
-3. Run `npm install` in `server/` and `client/` if dependencies changed.
-4. Restart backend process.
-5. Restart FiveM resource/server.
-6. Re-run post-install validation checklist.
+Backend:
 
-## 12) Related Documents
+- `GET /api/health` returns `status: ok`.
+- Admin login creates a backend socket log.
 
-- `README.md` for project-level onboarding
-- `docs/TECHNICAL-ARCHITECTURE.md` for system design and scalability decisions
+Telemetry:
+
+- FiveM console logs resource startup.
+- Player count changes in `/api/health`.
+- Dashboard player list and map update.
+
+Streaming:
+
+- Click watch on a player.
+- Backend logs stream start.
+- Stream overlay receives frames.
+- Close the stream.
+- Backend logs stream stop when the watcher set becomes empty.
+
+## 10. Troubleshooting
+
+| Problem | Likely cause | Fix |
+|---|---|---|
+| Dashboard cannot reach backend | Wrong `VITE_SERVER_URL` or backend down | Check URL, process, firewall |
+| Login rejected | Credential mismatch | Check `server/.env` |
+| CORS error | Dashboard origin not allowed | Update `CORS_ORIGIN` |
+| No players visible | Ingest not accepted | Check `BACKEND_URL`, `API_SECRET`, FiveM networking |
+| Stream error: NUI not connected | Player client did not connect hidden NUI | Check resource load and NUI script paths |
+| Map has markers but no tiles | Tile assets missing | Verify `client/public/styleSatelite/` |
+| Streams are heavy | Frame payload too large/frequent | Lower scale, FPS, then quality |
+
+## 11. Upgrade Procedure
+
+1. Back up `server/.env`.
+2. Back up `fivem-watch-resource/config.js`.
+3. Deploy updated files.
+4. Run `npm install` in `server/` and `client/` if dependencies changed.
+5. Rebuild dashboard if serving static files.
+6. Restart backend.
+7. Restart FiveM resource.
+8. Run the validation checklist.
+
+## 12. Related Docs
+
+- [README.md](README.md)
+- [TECHNICAL-ARCHITECTURE.md](TECHNICAL-ARCHITECTURE.md)
+- [docs/API.md](docs/API.md)
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md)

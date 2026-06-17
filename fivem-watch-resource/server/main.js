@@ -7,7 +7,7 @@
  * This script runs server-side only. It:
  * 1. Periodically collects all connected player data
  *    (ID, name, coordinates, health, armor, ping)
- * 2. Sends it to the fivem-watch-web backend via HTTP POST
+ * 2. Sends it to the fivem-watch backend via HTTP POST
  *
  * IMPORTANT: FiveM's JS runtime runs on Node.js. We use the
  * built-in `http` module which is ALWAYS available, unlike
