@@ -121,6 +121,7 @@ Edit `server/.env`:
 
 ```env
 PORT=3001
+NODE_ENV=development
 API_SECRET=CHANGE_ME_TO_A_RANDOM_SECRET
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=CHANGE_ME
@@ -214,6 +215,7 @@ See [docs/API.md](docs/API.md).
 - Use HTTPS through a reverse proxy.
 - Set `CORS_ORIGIN` to exact dashboard origins.
 - Keep `API_SECRET` long, random, and private.
+- Set `NODE_ENV=production` so unsafe defaults are rejected at boot.
 - Restrict backend ingress where possible.
 - Run the backend under a process supervisor.
 

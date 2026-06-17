@@ -42,6 +42,7 @@ Edit `server/.env`:
 
 ```env
 PORT=3001
+NODE_ENV=development
 API_SECRET=CHANGE_ME_TO_A_RANDOM_SECRET
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=CHANGE_ME
@@ -111,6 +112,13 @@ npm run build
 ```
 
 Serve `client/dist/` behind the same HTTPS edge as the API or another trusted static host.
+
+The backend can also serve the built dashboard in production:
+
+```env
+NODE_ENV=production
+CLIENT_DIST=../client/dist
+```
 
 ## 5. FiveM Resource Setup
 

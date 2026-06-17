@@ -11,7 +11,7 @@
  */
 
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import { Eye, Crosshair, Users } from '@phosphor-icons/react';
 
 /**
@@ -75,7 +75,7 @@ export default function PlayerList({
       <div className="player-list">
         <AnimatePresence mode="popLayout">
           {filtered.length === 0 ? (
-            <motion.div
+            <Motion.div
               key="empty"
               className="empty-state"
               initial={{ opacity: 0 }}
@@ -89,12 +89,12 @@ export default function PlayerList({
                   ? 'Waiting for FiveM server connection...'
                   : 'No results match your search'}
               </p>
-            </motion.div>
+            </Motion.div>
           ) : (
             filtered.map((player) => {
               const isStreaming = streamingIds.includes(player.id);
               return (
-                <motion.div
+                <Motion.div
                   key={player.id}
                   layoutId={`player-${player.id}`}
                   className={`player-card ${selectedId === player.id ? 'active' : ''}`}
@@ -149,7 +149,7 @@ export default function PlayerList({
                       <Eye size={16} weight={isStreaming ? 'fill' : 'regular'} />
                     </button>
                   </div>
-                </motion.div>
+                </Motion.div>
               );
             })
           )}

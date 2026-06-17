@@ -3,14 +3,13 @@
  *
  * Renders a floating overlay that displays the live screenshot
  * stream coming from a player's FiveM NUI client. Frames arrive
- * as base64-encoded JPEG strings via Socket.io and are rendered
- * onto an <img> element for smooth playback (~5 FPS).
+ * as WebP data URLs via Socket.io and are rendered onto an <img>.
  *
  * @module LiveStream
  */
 
 import { useEffect, useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import { X, VideoCamera, CircleNotch, CornersOut, Gear } from '@phosphor-icons/react';
 import { getSocket } from '../socket';
 
@@ -39,7 +38,7 @@ export default function LiveStream({ playerId, playerName, indexOffset = 0, onCl
     try {
       const saved = localStorage.getItem('fivem-watch-quality');
       if (saved && QUALITY_PRESETS[saved]) return saved;
-    } catch (e) {
+    } catch {
       // ignore
     }
     return 'Medium';
@@ -81,7 +80,7 @@ export default function LiveStream({ playerId, playerName, indexOffset = 0, onCl
 
   return (
     <AnimatePresence>
-      <motion.div
+      <Motion.div
         className={`stream-overlay ${isMaximized ? 'maximized' : ''}`}
         initial={{ opacity: 0, y: 40, scale: 0.95 }}
         animate={{
@@ -169,7 +168,7 @@ export default function LiveStream({ playerId, playerName, indexOffset = 0, onCl
           {/* Simple Quality Dropdown Overlay */}
           <AnimatePresence>
             {showSettings && (
-              <motion.div
+              <Motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
@@ -215,11 +214,11 @@ export default function LiveStream({ playerId, playerName, indexOffset = 0, onCl
                     </button>
                   ))}
                 </div>
-              </motion.div>
+              </Motion.div>
             )}
           </AnimatePresence>
         </div>
-      </motion.div>
+      </Motion.div>
     </AnimatePresence>
   );
 }

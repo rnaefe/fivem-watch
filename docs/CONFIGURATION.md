@@ -16,19 +16,25 @@ Options:
 | Name | Default | Required | Description |
 |---|---|---|---|
 | `PORT` | `3001` | No | HTTP and Socket.io port |
+| `NODE_ENV` | `development` | No | Set to `production` to enforce production safety checks |
 | `API_SECRET` | `CHANGE_ME_TO_A_RANDOM_SECRET` | Yes | Shared secret for ingest, NUI sockets, and dashboard token |
 | `ADMIN_USERNAME` | `admin` | Yes | Dashboard login username |
 | `ADMIN_PASSWORD` | `CHANGE_ME` | Yes | Dashboard login password |
 | `CORS_ORIGIN` | `http://localhost:5173` | Yes | Allowed dashboard origin, `*`, or comma-separated origins |
+| `CLIENT_DIST` | `../client/dist` | No | Static dashboard build path for production serving |
+| `MAX_PLAYERS_PER_INGEST` | `2048` | No | Maximum accepted players per telemetry payload |
+| `MAX_FRAME_LENGTH` | `5000000` | No | Maximum accepted frame payload size |
 
 Production example:
 
 ```env
 PORT=3001
+NODE_ENV=production
 API_SECRET=9f6a...long_random_hex
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace_this
 CORS_ORIGIN=https://watch.example.com
+CLIENT_DIST=../client/dist
 ```
 
 Multiple origins:

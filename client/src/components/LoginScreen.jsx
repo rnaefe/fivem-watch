@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
 
@@ -50,7 +50,7 @@ export default function LoginScreen({ onLogin }) {
 
   return (
     <div className="login-screen">
-      <motion.div
+      <Motion.div
         className="login-card"
         initial={{ opacity: 0, y: 20, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -92,15 +92,15 @@ export default function LoginScreen({ onLogin }) {
         </form>
 
         {error && (
-          <motion.div
+          <Motion.div
             className="login-error"
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
           >
             {error}
-          </motion.div>
+          </Motion.div>
         )}
-      </motion.div>
+      </Motion.div>
     </div>
   );
 }

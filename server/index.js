@@ -21,26 +21,105 @@
 require('dotenv').config();
 
 const express = require('express');
+const fs = require('fs');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 
 // ─── Configuration ─────────────────────────────────────────────
+const DEFAULT_SECRET = 'CHANGE_ME_TO_A_RANDOM_SECRET';
+const DEFAULT_PASSWORD = 'CHANGE_ME';
 const PORT = process.env.PORT || 3001;
-const API_SECRET = process.env.API_SECRET || 'CHANGE_ME_TO_A_RANDOM_SECRET';
+const API_SECRET = process.env.API_SECRET || DEFAULT_SECRET;
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'CHANGE_ME';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_PASSWORD;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const CLIENT_DIST = process.env.CLIENT_DIST || path.join(__dirname, '..', 'client', 'dist');
+const MAX_PLAYERS_PER_INGEST = Number(process.env.MAX_PLAYERS_PER_INGEST || 2048);
+const MAX_FRAME_LENGTH = Number(process.env.MAX_FRAME_LENGTH || 5_000_000);
+
+function parseCorsOrigin(value) {
+  return value.trim() === '*' ? true : value.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function assertProductionConfig() {
+  if (NODE_ENV !== 'production') return;
+  const badSecret = !process.env.API_SECRET || API_SECRET === DEFAULT_SECRET || API_SECRET.length < 32;
+  const badPassword = !process.env.ADMIN_PASSWORD || ADMIN_PASSWORD === DEFAULT_PASSWORD || ADMIN_PASSWORD.length < 12;
+  if (badSecret || badPassword || CORS_ORIGIN.trim() === '*') {
+    throw new Error('Refusing production start: set strong API_SECRET, ADMIN_PASSWORD, and explicit CORS_ORIGIN.');
+  }
+}
+
+function normalizePlayer(player) {
+  if (!player || typeof player !== 'object') return null;
+  const id = Number(player.id);
+  const x = Number(player.x);
+  const y = Number(player.y);
+  const z = Number(player.z);
+  if (!Number.isInteger(id) || id < 0 || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+  return {
+    id,
+    name: String(player.name || `Player ${id}`).slice(0, 64),
+    ping: Math.max(0, Number(player.ping) || 0),
+    x,
+    y,
+    z,
+    health: Math.max(0, Math.min(200, Number(player.health) || 0)),
+    armor: Math.max(0, Math.min(100, Number(player.armor) || 0)),
+    heading: ((Number(player.heading) || 0) % 360 + 360) % 360,
+  };
+}
+
+function normalizePlayers(payload) {
+  if (!Array.isArray(payload) || payload.length > MAX_PLAYERS_PER_INGEST) return null;
+  const players = payload.map(normalizePlayer);
+  return players.every(Boolean) ? players : null;
+}
+
+function sanitizeStreamConfig(config) {
+  if (!config || typeof config !== 'object') return null;
+  const numberOr = (value, fallback) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const next = {};
+  if (config.streamFps !== undefined) next.streamFps = Math.max(1, Math.min(30, numberOr(config.streamFps, 1)));
+  if (config.resolutionScale !== undefined) next.resolutionScale = Math.max(0.1, Math.min(1, numberOr(config.resolutionScale, 0.5)));
+  if (config.streamQuality !== undefined) next.streamQuality = Math.max(0.1, Math.min(1, numberOr(config.streamQuality, 0.5)));
+  return Object.keys(next).length ? next : null;
+}
+
+function isValidPlayerId(value) {
+  return /^\d+$/.test(String(value));
+}
+
+function isValidFrame(data) {
+  return typeof data === 'string' && data.length <= MAX_FRAME_LENGTH && data.startsWith('data:image/webp;base64,');
+}
+
+assertProductionConfig();
 
 // ─── Express App ───────────────────────────────────────────────
 const app = express();
 
 /** Parse CORS origin — supports wildcard "*" or comma-separated URLs */
-const parsedOrigin = CORS_ORIGIN.trim() === '*' ? true : CORS_ORIGIN.split(',').map(s => s.trim());
+const parsedOrigin = parseCorsOrigin(CORS_ORIGIN);
 
+app.disable('x-powered-by');
 app.use(cors({ origin: parsedOrigin, credentials: true }));
 app.use(express.json({ limit: '5mb' }));
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 const server = http.createServer(app);
 
@@ -50,7 +129,7 @@ const io = new Server(server, {
     origin: parsedOrigin,
     methods: ['GET', 'POST'],
   },
-  maxHttpBufferSize: 5e6, // 5 MB — enough for JPEG frames
+  maxHttpBufferSize: MAX_FRAME_LENGTH,
 });
 
 // ─── In-Memory State ──────────────────────────────────────────
@@ -81,6 +160,19 @@ const adminSockets = new Set();
 
 /** @type {Map<string, Set<string>>} Map of player server id → set of admin socket IDs watching */
 const streamWatchers = new Map();
+const loginAttempts = new Map();
+
+function tooManyLoginAttempts(ip) {
+  const now = Date.now();
+  const state = loginAttempts.get(ip) || { count: 0, resetAt: now + 60_000 };
+  if (state.resetAt < now) {
+    state.count = 0;
+    state.resetAt = now + 60_000;
+  }
+  state.count += 1;
+  loginAttempts.set(ip, state);
+  return state.count > 10;
+}
 
 // ─── REST Endpoints ───────────────────────────────────────────
 
@@ -93,6 +185,10 @@ const streamWatchers = new Map();
  * @returns {{ success: boolean, token?: string, error?: string }}
  */
 app.post('/api/auth/login', (req, res) => {
+  if (tooManyLoginAttempts(req.ip)) {
+    return res.status(429).json({ success: false, error: 'Too many attempts' });
+  }
+
   const { username, password } = req.body;
 
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
@@ -132,13 +228,15 @@ app.post('/api/ingest', (req, res) => {
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
-  const players = req.body;
-  if (Array.isArray(players)) {
-    playersState = players;
-    // Broadcast to all authenticated admins
-    for (const adminId of adminSockets) {
-      io.to(adminId).emit('players_update', playersState);
-    }
+  const players = normalizePlayers(req.body);
+  if (!players) {
+    return res.status(400).json({ error: 'Invalid player payload' });
+  }
+
+  playersState = players;
+  // Broadcast to all authenticated admins
+  for (const adminId of adminSockets) {
+    io.to(adminId).emit('players_update', playersState);
   }
 
   return res.json({ ok: true });
@@ -163,7 +261,9 @@ io.on('connection', (socket) => {
      * @param {PlayerData[]} players — Array of all connected players
      */
     socket.on('players_update', (players) => {
-      playersState = players;
+      const normalized = normalizePlayers(players);
+      if (!normalized) return;
+      playersState = normalized;
       // Broadcast to all authenticated admins
       for (const adminId of adminSockets) {
         io.to(adminId).emit('players_update', playersState);
@@ -189,16 +289,21 @@ io.on('connection', (socket) => {
    */
   if (role === 'fivem-nui' && secret === API_SECRET && playerId) {
     const pid = String(playerId);
+    if (!isValidPlayerId(pid)) {
+      socket.disconnect(true);
+      return;
+    }
     nuiClients.set(pid, socket.id);
     console.log(`[fivem-watch] ✓ NUI client connected for player #${pid} (${socket.id})`);
 
     /**
      * @event frame
-     * Receives a single JPEG frame (base64) from the player's NUI.
+     * Receives a single WebP frame data URL from the player's NUI.
      * Relays it ONLY to admin sockets that are watching this player.
-     * @param {string} data — Base64-encoded JPEG image
+     * @param {string} data — Base64-encoded WebP data URL
      */
     socket.on('frame', (data) => {
+      if (!isValidFrame(data)) return;
       // DEBUG: console.log(`[fivem-watch] Frame received from #${pid}, length: ${data?.length || 0}`);
       const watchers = streamWatchers.get(pid);
       if (watchers) {
@@ -237,6 +342,7 @@ io.on('connection', (socket) => {
      */
     socket.on('start_stream', (targetPlayerId) => {
       const pid = String(targetPlayerId);
+      if (!isValidPlayerId(pid)) return;
       const nuiSocketId = nuiClients.get(pid);
 
       if (!nuiSocketId) {
@@ -267,9 +373,12 @@ io.on('connection', (socket) => {
     socket.on('update_stream_config', (data) => {
       const { playerId, config } = data;
       const pid = String(playerId);
+      if (!isValidPlayerId(pid)) return;
+      const cleanConfig = sanitizeStreamConfig(config);
+      if (!cleanConfig) return;
       const nuiSocketId = nuiClients.get(pid);
       if (nuiSocketId) {
-        io.to(nuiSocketId).emit('update_config', config);
+        io.to(nuiSocketId).emit('update_config', cleanConfig);
       }
     });
 
@@ -281,6 +390,7 @@ io.on('connection', (socket) => {
      */
     socket.on('stop_stream', (targetPlayerId) => {
       const pid = String(targetPlayerId);
+      if (!isValidPlayerId(pid)) return;
       const watchers = streamWatchers.get(pid);
 
       if (watchers) {
@@ -332,12 +442,32 @@ io.on('connection', (socket) => {
   socket.disconnect(true);
 });
 
+if (NODE_ENV === 'production' && fs.existsSync(path.join(CLIENT_DIST, 'index.html'))) {
+  app.use(express.static(CLIENT_DIST, { index: false, maxAge: '1h' }));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(path.join(CLIENT_DIST, 'index.html'));
+  });
+} else if (NODE_ENV === 'production') {
+  console.warn(`[fivem-watch] CLIENT_DIST not found, running API-only: ${CLIENT_DIST}`);
+}
+
 // ─── Server Start ─────────────────────────────────────────────
-server.listen(PORT, () => {
-  console.log('');
-  console.log('  ╔══════════════════════════════════════════╗');
-  console.log('  ║      fivem-watch server is running       ║');
-  console.log(`  ║      http://localhost:${PORT}              ║`);
-  console.log('  ╚══════════════════════════════════════════╝');
-  console.log('');
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log('');
+    console.log('  ╔══════════════════════════════════════════╗');
+    console.log('  ║      fivem-watch server is running       ║');
+    console.log(`  ║      http://localhost:${PORT}              ║`);
+    console.log('  ╚══════════════════════════════════════════╝');
+    console.log('');
+  });
+}
+
+module.exports = {
+  normalizePlayer,
+  normalizePlayers,
+  sanitizeStreamConfig,
+  isValidFrame,
+  parseCorsOrigin,
+};
